@@ -1,0 +1,210 @@
+---
+title: "Project Coursera"
+author: "Guillaume Fouré"
+date: "5/26/2020"
+output: html_document
+---
+
+```{r setup}
+# Guillaume Fouré, EDHEC Student
+# Prediction Assignment 
+
+#Loading librairies :
+library(tidyverse)
+library(rpart)
+library(rpart.plot)
+library(caret)
+library(C50)
+library(e1071)
+library(party)
+library(randomForest)
+library(kknn)
+library(ggplot2)
+library(ROCR)
+library(naivebayes)
+library(nnet)
+library(HistogramTools)
+library(tree)
+library(corrplot)
+library(rattle)
+library(rapportools)
+
+#Download data sets:
+
+project_train <-
+  read.csv(
+    "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",
+    header = TRUE,
+    sep = ",",
+    dec = ".",
+    stringsAsFactors = TRUE
+  )
+
+project_test <-
+  read.csv(
+    "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",
+    header = TRUE,
+    sep = ",",
+    dec = ".",
+    stringsAsFactors = TRUE
+  )
+
+#Condition on columns, remove NAs:
+selection <- (colSums(is.na(project_train)) == 0)
+project_train <- project_train[, selection]
+
+project_train <- project_train[,c(2:11,21:42, 49:51, 61:73, 83,93)]
+project_test <- project_test[, selection][,c(2:11,21:42, 49:51, 61:73, 83,93)]
+
+#Create data partition:
+
+set.seed(264) #pour avoir les mêmes sets d'e moyennage'entrainement et de test pour chaque classifieur
+test_index <-
+  createDataPartition(
+    project_train$classe,
+    times = 1,
+    p = 3 / 4,
+    list = FALSE
+  )
+
+train_set <- project_train[test_index, ]
+test_set <- project_train[-test_index, ] #validation set
+
+# train_set <- train_set[,c(2:11,21:42, 49:51, 61:73, 83,93)]
+# test_set <- test_set[,c(2:11,21:42, 49:51, 61:73, 83,93)]
+# 
+# project_test <- project_test[,c(2:11,21:42, 49:51, 61:73, 83,92)]
+
+##################################################################
+###             • CREATION OF CLASSIFIERS                      ###
+##################################################################
+
+#Generating classifier functions  :
+
+create_rpart_tree <- function (data_set, split_var, minbucket_var, minsplit_var) {
+  #enter "None" if you don't want any specific parameter
+  ifelse(split_var != "None",
+         return(rpart(classe ~ ., data = data_set, parms =  list(split = as.character(split_var)), minbucket = as.numeric(minbucket_var), minsplit = as.numeric(minsplit_var))),
+         return(rpart(classe ~ ., data = data_set)))
+}
+
+create_C50_tree <- function (data_set, trials_var) {
+  return(C5.0(classe ~ ., data = data_set, trials = as.integer(trials_var)))
+}
+
+create_randomForest <- function (data_set, ntree_var, mtry_var) {
+  return(randomForest(classe ~ ., data = data_set, ntree = as.numeric(ntree_var), mtry = as.numeric(mtry_var)))
+}
+
+create_naive_bayes <- function (data_set, laplace_var, usekernel_var){
+  return(naive_bayes(classe ~ ., data = data_set, laplace = as.numeric(laplace_var), usekernel = as.logical(usekernel_var)))
+}
+
+create_kknn <- function (data_set1, data_set2, k_var, distance_var){
+  return(kknn(classe ~ ., train = data_set1, test = data_set2, k = as.numeric(k_var), distance = as.numeric(distance_var)))
+}
+
+create_svm <- function (data_set, kernel_var){
+  return(svm(classe ~ ., data = data_set, probability = TRUE, kernel = kernel_var))
+}
+
+create_nnet <- function (data_set, size_var, maxit_var){
+  return(nnet(classe ~ ., data = data_set, size = as.numeric(size_var), maxit = as.numeric(maxit_var)))
+}
+
+create_tree <- function (data_set, split_var){
+  return(tree(classe ~ ., data = data_set, split = split_var))
+}
+
+###############################
+##      • MAIN FONCTION •   ###
+###############################
+
+# Resultats_classifieur generates all the results for all the above classifiers, and returns the model
+# (syntaxe is identical for the first 4, ajustements is required for the others) :
+
+Resultat_classifieur <- function(classifieur) {
+  #close potential sinks (opend for the classifier nnet)
+  while (as.numeric(sink.number()>0)){sink()} 
+  
+  #########################################################
+  # • ARGUMENTS : 
+  #classifieur = classifier and its parameters :
+  #Example : classifieur = list("rpart", split, minbucket)
+  #
+  #########################################################
+  
+  #====================
+  # • Classifier named "tree", for all model, even if not shaped as a tree (ease of notation)
+  if (classifieur[1]=="nnet"){sink('output.txt', append=T)} #sink for intermediary messages (not to plot)
+  
+  tree <- rpart(classe ~ ., data = train_set, method="class")
+  ifelse(classifieur[1] == "rpart",
+         tree <- create_rpart_tree (train_set, classifieur[2], classifieur[3], classifieur[4]),
+         ifelse(classifieur[1] == "C50",
+                tree <- create_C50_tree(train_set, classifieur[2]),
+                ifelse(classifieur[1] == "randomForest",
+                       tree <- create_randomForest(train_set, classifieur[2], classifieur[3]),
+                       ifelse(classifieur[1] == "kknn",
+                              tree <- create_kknn(train_set, test_set, classifieur[2], classifieur[3]),
+                              ifelse(classifieur[1] == "naive_bayes",
+                                     tree <- create_naive_bayes(train_set, classifieur[2], classifieur[3]), 
+                                     ifelse(classifieur[1] == "svm",
+                                            tree <- create_svm(train_set, classifieur[2]),
+                                            ifelse(classifieur[1] == "nnet",
+                                                   tree <- create_nnet(train_set, classifieur[2], classifieur[3]),
+                                                   # ifelse(classifieur[1] == "tree",
+                                                   #     tree <- create_tree(train_set, classifieur[2]),
+                                                   0)))))))
+  
+  if (classifieur[1]=="nnet"){sink()} #fin du puits
+  
+  # • Classes prediction:
+  
+  if (classifieur[1]=="svm"){prediction_test <- predict(tree, test_set, type = "response")}
+  else {if (classifieur[1]=="tree") {prediction_test <- predict(tree, test_set, type = "vector")}
+    else{if (classifieur[1]!="kknn") {prediction_test <- predict(tree, test_set, type = "class")}}}
+  
+  print(confusionMatrix(test_set$classe, prediction_test))
+  
+  return(tree)
+}
+
+#Showing results for the different classifiers:
+# par(mfrow=c(1,1))
+Resultat_classifieur(classifieur = list("rpart", "gini", 1, 3))
+Resultat_classifieur(classifieur = list("rpart", "information", 1, 17))
+Resultat_classifieur(classifieur = list("C50", 8))
+Resultat_classifieur(classifieur = list("randomForest", 250, 4))
+Resultat_classifieur(classifieur = list("naive_bayes", 1, FALSE))
+Resultat_classifieur(classifieur = list("svm", "linear"))
+Resultat_classifieur(classifieur = list("kknn", 7, 1))
+Resultat_classifieur(classifieur = list("nnet", 50, 100))
+Resultat_classifieur(classifieur = list("tree", "deviance"))
+Resultat_classifieur(classifieur = list("tree", "gini"))
+
+#################################
+#Application to the test set of the RandomForest that gave the best results:
+
+model <- Resultat_classifieur(classifieur = list("randomForest", 250, 4))
+
+#reset levels (to avoid problems)
+levels(project_test$user_name) <- levels(project_train$user_name)
+levels(project_test$cvtd_timestamp) <- levels(project_train$cvtd_timestamp)
+levels(project_test$new_window) <- levels(project_train$new_window)
+
+#Prediction
+prediction_test <- predict(model, project_test[-50])
+print(prediction_test)
+
+#Writing solutions
+files_writing = function(x){
+  for(i in 1:length(x)){
+    filename = paste0("Assignment_Solutions/problem_id_",i,".txt")
+    write.table(x[i], file = filename, quote = FALSE, row.names = FALSE, col.names = FALSE)
+  }
+}
+
+files_writing(prediction_test <- predict(model, project_test[-50]))
+
+```
