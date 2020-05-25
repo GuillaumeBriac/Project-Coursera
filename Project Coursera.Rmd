@@ -197,14 +197,5 @@ levels(project_test$new_window) <- levels(project_train$new_window)
 prediction_test <- predict(model, project_test[-50])
 print(prediction_test)
 
-#Writing solutions
-files_writing = function(x){
-  for(i in 1:length(x)){
-    filename = paste0("Assignment_Solutions/problem_id_",i,".txt")
-    write.table(x[i], file = filename, quote = FALSE, row.names = FALSE, col.names = FALSE)
-  }
-}
-
-files_writing(prediction_test <- predict(model, project_test[-50]))
 
 ```
