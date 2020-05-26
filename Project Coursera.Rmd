@@ -6,7 +6,7 @@ output: html_document
 ---
 
 ```{r setup}
-# Guillaume Fouré, EDHEC Student
+# Guillaume Fouré
 # Prediction Assignment 
 
 #Loading librairies :
